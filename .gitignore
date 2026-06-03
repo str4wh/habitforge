@@ -30,8 +30,8 @@ migrate_working_dir/
 .flutter-plugins-dependencies
 .pub-cache/
 .pub/
-/build/
-# Allow the Flutter web build output so Netlify can serve it
+# Ignore all build output EXCEPT the Flutter web build (served by Netlify)
+/build/*
 !/build/web
 /coverage/
 
