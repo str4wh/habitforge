@@ -1,0 +1,23 @@
+[build]
+  publish  = "build/web"
+  functions = "netlify/functions"
+
+# Flutter web → Netlify build command.
+# Netlify doesn't have Flutter pre-installed, so we fetch it here.
+# Alternatively: build locally with `flutter build web --release` and
+# drag-drop the build/web folder to Netlify — skips the step below entirely.
+[build.environment]
+  FLUTTER_VERSION = "stable"
+
+# Serve the FCM service worker with the right headers
+[[headers]]
+  for = "/firebase-messaging-sw.js"
+    [headers.values]
+      Service-Worker-Allowed = "/"
+      Cache-Control           = "no-cache, no-store, must-revalidate"
+
+# Flutter SPA: all routes → index.html  (also handled by web/_redirects)
+[[redirects]]
+  from   = "/*"
+  to     = "/index.html"
+  status = 200
