@@ -1,8 +1,10 @@
+import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../main.dart' show kMaxContentWidth;
 import '../models/habit.dart';
 import '../models/habit_log.dart';
@@ -33,11 +35,20 @@ class _DailyCheckinScreenState extends ConsumerState<DailyCheckinScreen> {
       _targetPromptShown = true;
       final user = ref.read(authProvider).valueOrNull;
       if (user == null || !mounted) return;
-      final target =
-          await FirestoreService.getSavingsTarget(user.uid);
-      if (target == null && mounted) {
-        _showTargetDialog(context, user.uid);
+
+      // Don't show again if user previously dismissed or already set a target
+      final prefs = await SharedPreferences.getInstance();
+      final dismissed = prefs.getBool('savings_target_dismissed_${user.uid}') ?? false;
+      if (dismissed) return;
+
+      final target = await FirestoreService.getSavingsTarget(user.uid);
+      if (target != null) {
+        // Already set — mark as dismissed so we never check Firestore again
+        await prefs.setBool('savings_target_dismissed_${user.uid}', true);
+        return;
       }
+
+      if (mounted) _showTargetDialog(context, user.uid);
     });
   }
 
@@ -86,7 +97,12 @@ class _DailyCheckinScreenState extends ConsumerState<DailyCheckinScreen> {
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(ctx),
+            onPressed: () async {
+              // Remember the skip so the dialog never appears again
+              final prefs = await SharedPreferences.getInstance();
+              await prefs.setBool('savings_target_dismissed_$uid', true);
+              if (ctx.mounted) Navigator.pop(ctx);
+            },
             child: const Text('Skip',
                 style: TextStyle(color: Colors.white38)),
           ),
@@ -98,6 +114,8 @@ class _DailyCheckinScreenState extends ConsumerState<DailyCheckinScreen> {
               final val = double.tryParse(ctrl.text);
               if (val != null && val > 0) {
                 await FirestoreService.setSavingsTarget(uid, val);
+                final prefs = await SharedPreferences.getInstance();
+                await prefs.setBool('savings_target_dismissed_$uid', true);
                 if (ctx.mounted) {
                   ref.invalidate(savingsTargetProvider);
                   Navigator.pop(ctx);
@@ -163,7 +181,7 @@ class _DailyCheckinScreenState extends ConsumerState<DailyCheckinScreen> {
 
 // ── CheckinBody ───────────────────────────────────────────────────────────────
 
-class _CheckinBody extends StatefulWidget {
+class _CheckinBody extends ConsumerStatefulWidget {
   final String uid;
   final List<Habit> activeHabits;
   final HabitLog? existingLog;
@@ -175,17 +193,21 @@ class _CheckinBody extends StatefulWidget {
   });
 
   @override
-  State<_CheckinBody> createState() => _CheckinBodyState();
+  ConsumerState<_CheckinBody> createState() => _CheckinBodyState();
 }
 
-class _CheckinBodyState extends State<_CheckinBody> {
+class _CheckinBodyState extends ConsumerState<_CheckinBody> {
   late List<String> _completedIds;
   double _savingsAmount = 0;
   double? _coldShowerMinutes;
   Map<String, int> _shukraniReach = {};
   String? _chakulaDeliverable;
   WorkoutData? _workout;
-  bool _saving = false;
+
+  // Auto-save state
+  Timer? _saveDebounce;
+  bool _isSaving = false;
+  bool _justSaved = false;
 
   @override
   void initState() {
@@ -210,18 +232,75 @@ class _CheckinBodyState extends State<_CheckinBody> {
     _workout = log?.workout;
   }
 
+  @override
+  void dispose() {
+    _saveDebounce?.cancel();
+    super.dispose();
+  }
+
+  // Debounced auto-save — fires 600ms after the last change
+  void _scheduleAutoSave() {
+    _saveDebounce?.cancel();
+    _saveDebounce =
+        Timer(const Duration(milliseconds: 600), _autoSave);
+  }
+
+  Future<void> _autoSave() async {
+    if (!mounted) return;
+    setState(() => _isSaving = true);
+    try {
+      final log = HabitLog(
+        date: DateFormat('yyyy-MM-dd').format(DateTime.now()),
+        completedHabits: _completedIds,
+        savingsAmount: _savingsAmount,
+        completedAt: DateTime.now(),
+        coldShowerMinutes: _coldShowerMinutes,
+        shukraniReach: _shukraniReach,
+        chakulaDeliverable: _chakulaDeliverable,
+        workout: _workout,
+      );
+      await FirestoreService.upsertLog(widget.uid, log);
+
+      if (!kIsWeb &&
+          _completedIds.length >= widget.activeHabits.length) {
+        await NotificationService.cancelTodayRemaining();
+      }
+
+      // Invalidate month + stats providers so other tabs refresh
+      final now = DateTime.now();
+      final monthKey =
+          '${now.year}-${now.month.toString().padLeft(2, '0')}';
+      ref.invalidate(monthLogsProvider(monthKey));
+      ref.invalidate(allLogsProvider);
+
+      if (mounted) {
+        setState(() {
+          _isSaving = false;
+          _justSaved = true;
+        });
+        Future.delayed(const Duration(seconds: 2), () {
+          if (mounted) setState(() => _justSaved = false);
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _isSaving = false);
+    }
+  }
+
   Future<void> _handleHabitTap(Habit habit) async {
     final type = habitTypeFor(habit.name);
 
     // Uncheck — always immediate
     if (_completedIds.contains(habit.id)) {
       setState(() => _completedIds.remove(habit.id));
+      _scheduleAutoSave();
       return;
     }
 
     // Simple check — no sheet needed
     if (!habitNeedsSheet(type)) {
       setState(() => _completedIds.add(habit.id));
+      _scheduleAutoSave();
       return;
     }
 
@@ -229,6 +308,7 @@ class _CheckinBodyState extends State<_CheckinBody> {
     final confirmed = await _showSheet(habit, type);
     if (confirmed && mounted) {
       setState(() => _completedIds.add(habit.id));
+      _scheduleAutoSave();
     }
   }
 
@@ -309,28 +389,6 @@ class _CheckinBodyState extends State<_CheckinBody> {
     }
   }
 
-  Future<void> _save() async {
-    setState(() => _saving = true);
-    try {
-      final log = HabitLog(
-        date: DateFormat('yyyy-MM-dd').format(DateTime.now()),
-        completedHabits: _completedIds,
-        savingsAmount: _savingsAmount,
-        completedAt: DateTime.now(),
-        coldShowerMinutes: _coldShowerMinutes,
-        shukraniReach: _shukraniReach,
-        chakulaDeliverable: _chakulaDeliverable,
-        workout: _workout,
-      );
-      await FirestoreService.upsertLog(widget.uid, log);
-      if (!kIsWeb &&
-          _completedIds.length >= widget.activeHabits.length) {
-        await NotificationService.cancelTodayRemaining();
-      }
-    } finally {
-      if (mounted) setState(() => _saving = false);
-    }
-  }
 
   String? _subtitleFor(Habit habit) {
     if (!_completedIds.contains(habit.id)) return null;
@@ -386,11 +444,9 @@ class _CheckinBodyState extends State<_CheckinBody> {
                         subtitle: _subtitleFor(habit),
                         onTap: () => _handleHabitTap(habit),
                       )),
-                  const SizedBox(height: 24),
-                  _SaveButton(
-                    saving: _saving,
-                    onPressed: _save,
-                  ),
+                  const SizedBox(height: 16),
+                  _AutoSaveIndicator(
+                      isSaving: _isSaving, justSaved: _justSaved),
                 ],
               ),
             ),
@@ -587,37 +643,44 @@ class _HabitTile extends StatelessWidget {
 
 // ── Save button ───────────────────────────────────────────────────────────────
 
-class _SaveButton extends StatelessWidget {
-  final bool saving;
-  final VoidCallback onPressed;
-  const _SaveButton({required this.saving, required this.onPressed});
+class _AutoSaveIndicator extends StatelessWidget {
+  final bool isSaving;
+  final bool justSaved;
+  const _AutoSaveIndicator(
+      {required this.isSaving, required this.justSaved});
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      width: double.infinity,
-      height: 52,
-      child: ElevatedButton(
-        onPressed: saving ? null : onPressed,
-        style: ElevatedButton.styleFrom(
-          backgroundColor: const Color(0xFFFF6B35),
-          foregroundColor: Colors.white,
-          shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12)),
-          disabledBackgroundColor: const Color(0xFF3A3A5A),
-        ),
-        child: saving
-            ? const SizedBox(
-                width: 20,
-                height: 20,
-                child: CircularProgressIndicator(
-                    strokeWidth: 2, color: Colors.white))
-            : const Text('SAVE CHECK-IN',
-                style: TextStyle(
-                    fontWeight: FontWeight.bold,
-                    letterSpacing: 1)),
-      ),
-    );
+    if (isSaving) {
+      return const Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          SizedBox(
+            width: 13,
+            height: 13,
+            child: CircularProgressIndicator(
+                strokeWidth: 2, color: Colors.white38),
+          ),
+          SizedBox(width: 8),
+          Text('Saving…',
+              style: TextStyle(color: Colors.white38, fontSize: 12)),
+        ],
+      );
+    }
+    if (justSaved) {
+      return const Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.check_circle_outline,
+              color: Color(0xFF00E676), size: 15),
+          SizedBox(width: 6),
+          Text('Saved',
+              style: TextStyle(
+                  color: Color(0xFF00E676), fontSize: 12)),
+        ],
+      );
+    }
+    return const SizedBox(height: 8);
   }
 }
 
