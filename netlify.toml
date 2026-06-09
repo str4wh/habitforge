@@ -1,8 +1,5 @@
 [build]
-  # No build command — build/web is pre-built locally and committed to the repo.
-  # To update the site: run `flutter build web --release` locally, then git push.
-  # To update the APK:  run `flutter build apk --release` and copy
-  #   build/app/outputs/flutter-apk/app-release.apk → build/web/habitforge.apk
+  command   = "bash ./netlify-build.sh"
   publish   = "build/web"
   functions = "netlify/functions"
 
