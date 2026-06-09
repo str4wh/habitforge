@@ -136,11 +136,134 @@ class _DailyCheckinScreenState extends ConsumerState<DailyCheckinScreen> {
     );
   }
 
+  void _showAddHabitDialog(BuildContext ctx, String uid) {
+    final nameCtrl = TextEditingController();
+    String selectedCategory = 'health';
+    final categories = [
+      ('health', 'Health'),
+      ('spiritual', 'Spiritual'),
+      ('work', 'Work'),
+      ('social', 'Social'),
+      ('finance', 'Finance'),
+      ('other', 'Other'),
+    ];
+
+    showDialog(
+      context: ctx,
+      builder: (dialogCtx) => StatefulBuilder(
+        builder: (dialogCtx, setDialogState) => AlertDialog(
+          backgroundColor: const Color(0xFF1A1A2E),
+          shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16)),
+          title: const Text('Add New Habit',
+              style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 18)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('Habit name',
+                  style:
+                      TextStyle(color: Colors.white54, fontSize: 12)),
+              const SizedBox(height: 6),
+              TextField(
+                controller: nameCtrl,
+                autofocus: true,
+                style: const TextStyle(color: Colors.white),
+                decoration: InputDecoration(
+                  hintText: 'e.g. Read 20 pages',
+                  hintStyle:
+                      const TextStyle(color: Colors.white24),
+                  filled: true,
+                  fillColor: const Color(0xFF0D0D1A),
+                  contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 12, vertical: 12),
+                  border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide: BorderSide.none),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide: const BorderSide(
+                        color: Color(0xFFFF6B35), width: 1.5),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              const Text('Category',
+                  style:
+                      TextStyle(color: Colors.white54, fontSize: 12)),
+              const SizedBox(height: 6),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: categories
+                    .map((c) => GestureDetector(
+                          onTap: () => setDialogState(
+                              () => selectedCategory = c.$1),
+                          child: AnimatedContainer(
+                            duration:
+                                const Duration(milliseconds: 150),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 12, vertical: 6),
+                            decoration: BoxDecoration(
+                              color: selectedCategory == c.$1
+                                  ? const Color(0xFFFF6B35)
+                                  : const Color(0xFF0D0D1A),
+                              borderRadius:
+                                  BorderRadius.circular(20),
+                              border: Border.all(
+                                color: selectedCategory == c.$1
+                                    ? const Color(0xFFFF6B35)
+                                    : const Color(0xFF2A2A4A),
+                              ),
+                            ),
+                            child: Text(c.$2,
+                                style: TextStyle(
+                                  color: selectedCategory == c.$1
+                                      ? Colors.white
+                                      : Colors.white54,
+                                  fontSize: 13,
+                                )),
+                          ),
+                        ))
+                    .toList(),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogCtx),
+              child: const Text('Cancel',
+                  style: TextStyle(color: Colors.white38)),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFFFF6B35)),
+              onPressed: () async {
+                final name = nameCtrl.text.trim();
+                if (name.isEmpty) return;
+                await FirestoreService.addHabit(
+                    uid, name, selectedCategory);
+                if (dialogCtx.mounted) Navigator.pop(dialogCtx);
+              },
+              child: const Text('Add Habit',
+                  style: TextStyle(color: Colors.white)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final auth = ref.watch(authProvider);
     final logAsync = ref.watch(todayLogProvider);
     final activeHabits = ref.watch(activeHabitsProvider);
+
+    final uid = auth.valueOrNull?.uid;
 
     return Scaffold(
       backgroundColor: const Color(0xFF0D0D1A),
@@ -162,6 +285,15 @@ class _DailyCheckinScreenState extends ConsumerState<DailyCheckinScreen> {
           ],
         ),
       ),
+      floatingActionButton: uid == null
+          ? null
+          : FloatingActionButton(
+              backgroundColor: const Color(0xFFFF6B35),
+              foregroundColor: Colors.white,
+              tooltip: 'Add habit',
+              onPressed: () => _showAddHabitDialog(context, uid),
+              child: const Icon(Icons.add),
+            ),
       body: auth.when(
         loading: () =>
             const Center(child: CircularProgressIndicator()),
@@ -242,6 +374,49 @@ class _CheckinBodyState extends ConsumerState<_CheckinBody> {
   Future<void> _loadWorkoutTargets() async {
     final targets = await FirestoreService.getWorkoutTargets(widget.uid);
     if (mounted) setState(() => _workoutTargets = targets);
+  }
+
+  Future<void> _deleteHabit(Habit habit) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1A2E),
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16)),
+        title: const Text('Delete Habit',
+            style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+                fontSize: 16)),
+        content: Text(
+          'Delete "${habit.name}"?\n\nThis cannot be undone.',
+          style: const TextStyle(color: Colors.white54, fontSize: 14),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel',
+                style: TextStyle(color: Colors.white38)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFFCC2222)),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete',
+                style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    await FirestoreService.deleteHabit(widget.uid, habit.id);
+    if (mounted) {
+      setState(() {
+        _completedIds.remove(habit.id);
+        _weeklyPlan.remove(habit.id);
+        _whyCache.remove(habit.id);
+      });
+    }
   }
 
   Future<void> _loadWeeklyPlan() async {
@@ -722,12 +897,49 @@ class _CheckinBodyState extends ConsumerState<_CheckinBody> {
                   ),
                   const SizedBox(height: 16),
                   ...active.expand((habit) => [
-                        _HabitTile(
-                          habit: habit,
-                          checked: _completedIds.contains(habit.id),
-                          subtitle: _subtitleFor(habit),
-                          onTap: () => _handleHabitTap(habit),
-                          onLongPress: () => _handleHabitLongPress(habit),
+                        Dismissible(
+                          key: ValueKey(habit.id),
+                          direction: DismissDirection.endToStart,
+                          confirmDismiss: (_) async {
+                            await _deleteHabit(habit);
+                            return false; // we handle removal ourselves
+                          },
+                          background: Container(
+                            alignment: Alignment.centerRight,
+                            margin: const EdgeInsets.only(bottom: 10),
+                            padding: const EdgeInsets.only(right: 20),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF3A0A0A),
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(
+                                  color: const Color(0xFFCC2222)
+                                      .withValues(alpha: 0.6)),
+                            ),
+                            child: const Row(
+                              mainAxisAlignment:
+                                  MainAxisAlignment.end,
+                              children: [
+                                Icon(Icons.delete_outline,
+                                    color: Color(0xFFFF4444),
+                                    size: 22),
+                                SizedBox(width: 6),
+                                Text('Delete',
+                                    style: TextStyle(
+                                        color: Color(0xFFFF4444),
+                                        fontSize: 13,
+                                        fontWeight:
+                                            FontWeight.w600)),
+                              ],
+                            ),
+                          ),
+                          child: _HabitTile(
+                            habit: habit,
+                            checked: _completedIds.contains(habit.id),
+                            subtitle: _subtitleFor(habit),
+                            onTap: () => _handleHabitTap(habit),
+                            onLongPress: () =>
+                                _handleHabitLongPress(habit),
+                          ),
                         ),
                         if ((_weeklyPlan[habit.id] ?? []).isNotEmpty)
                           _DeliverablesSection(

@@ -398,4 +398,18 @@ class FirestoreService {
         .doc(habitId)
         .update({'why': FieldValue.delete()});
   }
+
+  static Future<void> addHabit(
+      String uid, String name, String category) async {
+    await _habitsCol(uid).add({
+      'name': name,
+      'category': category,
+      'isActive': true,
+      'createdAt': FieldValue.serverTimestamp(),
+    });
+  }
+
+  static Future<void> deleteHabit(String uid, String habitId) async {
+    await _habitsCol(uid).doc(habitId).delete();
+  }
 }
