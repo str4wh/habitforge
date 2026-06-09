@@ -75,6 +75,101 @@ async function sendNotification(body) {
   }
 }
 
+// ── Savings velocity helpers ──────────────────────────────────────────────────
+
+function getNairobiNow() {
+  return new Date(Date.now() + 3 * 3600 * 1000);
+}
+
+function daysInMonthFor(year, month) {
+  // month is 1-based; new Date(year, month, 0) gives last day of that month
+  return new Date(year, month, 0).getDate();
+}
+
+async function sendSavingsVelocityNotifications() {
+  const db        = getFirestore();
+  const messaging = getMessaging();
+
+  const now        = getNairobiNow();
+  const year       = now.getUTCFullYear();
+  const month      = now.getUTCMonth() + 1; // 1-based
+  const dayOfMonth = now.getUTCDate();
+  const totalDays  = daysInMonthFor(year, month);
+  const daysRemaining = totalDays - dayOfMonth;
+
+  const monthStart = `${year}-${String(month).padStart(2, '0')}-01`;
+  const nextMonth  = month === 12 ? 1 : month + 1;
+  const nextYear   = month === 12 ? year + 1 : year;
+  const monthEnd   = `${nextYear}-${String(nextMonth).padStart(2, '0')}-01`;
+
+  const usersSnap = await db.collection('users').get();
+
+  for (const userDoc of usersSnap.docs) {
+    const uid = userDoc.id;
+
+    const [tokenDoc, targetDoc, logsSnap] = await Promise.all([
+      db.collection('users').doc(uid).collection('meta').doc('fcmToken').get(),
+      db.collection('users').doc(uid).collection('meta').doc('savingsTarget').get(),
+      db.collection('users').doc(uid).collection('logs')
+        .where('__name__', '>=', monthStart)
+        .where('__name__', '<',  monthEnd)
+        .get(),
+    ]);
+
+    // No token or no target set → skip
+    if (!tokenDoc.exists || !tokenDoc.data().token) continue;
+    if (!targetDoc.exists) continue;
+    const target = targetDoc.data().target;
+    if (!target || target <= 0) continue;
+
+    const monthSaved = logsSnap.docs.reduce(
+      (sum, doc) => sum + (doc.data().savingsAmount || 0), 0);
+
+    const dailyAverage  = monthSaved / dayOfMonth;
+    const projected     = dailyAverage * totalDays;
+
+    // On track (within 90 % threshold) → no notification
+    if (projected >= target * 0.9) continue;
+
+    const dailyRequired = daysRemaining > 0
+      ? Math.max(0, Math.round((target - monthSaved) / daysRemaining))
+      : 0;
+
+    const fmt = (n) => Math.round(n).toLocaleString('en-KE');
+
+    const body = dayOfMonth < 15
+      ? `You're behind on savings. At this rate you finish the month at KES ${fmt(projected)}, not KES ${fmt(target)}. You need KES ${dailyRequired.toLocaleString('en-KE')}/day for the rest of the month.`
+      : `Past the halfway point and still behind on savings. KES ${fmt(target - projected)} short of your target. That's KES ${dailyRequired.toLocaleString('en-KE')}/day for the remaining ${daysRemaining} days. Stop spending.`;
+
+    const token = tokenDoc.data().token;
+
+    try {
+      await messaging.send({
+        token,
+        notification: { title: 'HabitForge', body },
+        webpush: {
+          notification: {
+            icon:               '/icons/Icon-192.png',
+            badge:              '/icons/Icon-192.png',
+            tag:                'habitforge-savings',
+            renotify:           true,
+            requireInteraction: false,
+          },
+          fcmOptions: { link: 'https://jitumenani.netlify.app' },
+        },
+      });
+    } catch (err) {
+      if (
+        err.code === 'messaging/registration-token-not-registered' ||
+        err.code === 'messaging/invalid-registration-token'
+      ) {
+        await db.collection('users').doc(uid)
+          .collection('meta').doc('fcmToken').delete();
+      }
+    }
+  }
+}
+
 // ── Scheduled notifications (Nairobi timezone) ────────────────────────────────
 
 const opts = { timeZone: 'Africa/Nairobi', region: 'us-central1' };
@@ -102,4 +197,9 @@ exports.notify9pm = onSchedule(
 exports.notify10pm = onSchedule(
   { ...opts, schedule: '0 22 * * *' },
   () => sendNotification("Another day gone. Was it worth it or did you just survive it?")
+);
+
+exports.notify8pmSavings = onSchedule(
+  { ...opts, schedule: '0 20 * * *' },
+  () => sendSavingsVelocityNotifications()
 );

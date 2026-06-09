@@ -1,6 +1,8 @@
 [build]
   # No build command — build/web is pre-built locally and committed to the repo.
   # To update the site: run `flutter build web --release` locally, then git push.
+  # To update the APK:  run `flutter build apk --release` and copy
+  #   build/app/outputs/flutter-apk/app-release.apk → build/web/habitforge.apk
   publish   = "build/web"
   functions = "netlify/functions"
 
@@ -10,6 +12,14 @@
     [headers.values]
       Service-Worker-Allowed = "/"
       Cache-Control           = "no-cache, no-store, must-revalidate"
+
+# APK download — correct MIME type so Android treats it as an installable package
+[[headers]]
+  for = "/*.apk"
+    [headers.values]
+      Content-Type        = "application/vnd.android.package-archive"
+      Content-Disposition = "attachment"
+      Cache-Control       = "public, max-age=86400"
 
 # Flutter SPA routing — all paths serve index.html
 [[redirects]]

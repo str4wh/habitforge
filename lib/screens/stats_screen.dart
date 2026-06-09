@@ -6,16 +6,24 @@ import '../main.dart' show kMaxContentWidth;
 import '../models/habit.dart';
 import '../models/habit_log.dart';
 import '../models/workout_data.dart';
+import '../providers/auth_provider.dart';
 import '../providers/habits_provider.dart';
 import '../providers/logs_provider.dart';
+import '../models/chakula_assessment.dart';
+import '../models/weekly_review.dart';
+import '../screens/sunday_planning_screen.dart';
+import '../services/firestore_service.dart';
 import '../utils/habit_utils.dart';
+import '../utils/savings_velocity.dart';
 
 class StatsScreen extends ConsumerWidget {
   const StatsScreen({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final uid = ref.watch(authProvider).valueOrNull?.uid;
     final activeCount = ref.watch(activeHabitsProvider).length;
+    final activeHabits = ref.watch(activeHabitsProvider);
     final habits = ref.watch(habitsProvider).maybeWhen(
         data: (h) => h, orElse: () => <Habit>[]);
     final statsAsync = ref.watch(statsWithCountProvider(activeCount));
@@ -54,9 +62,10 @@ class StatsScreen extends ConsumerWidget {
                 stats: stats,
                 monthLogs: monthLogs,
                 habits: habits,
-                savingsTarget:
-                    targetAsync.valueOrNull,
+                savingsTarget: targetAsync.valueOrNull,
                 activeCount: activeCount,
+                uid: uid,
+                activeHabits: activeHabits,
               ),
             ),
           ),
@@ -74,6 +83,8 @@ class _StatsBody extends StatelessWidget {
   final List<Habit> habits;
   final double? savingsTarget;
   final int activeCount;
+  final String? uid;
+  final List<Habit> activeHabits;
 
   const _StatsBody({
     required this.stats,
@@ -81,6 +92,8 @@ class _StatsBody extends StatelessWidget {
     required this.habits,
     required this.savingsTarget,
     required this.activeCount,
+    required this.uid,
+    required this.activeHabits,
   });
 
   @override
@@ -177,8 +190,17 @@ class _StatsBody extends StatelessWidget {
               saved: stats.cumulativeSavings,
               target: savingsTarget!,
             ),
-            const SizedBox(height: 24),
+            const SizedBox(height: 16),
           ],
+
+          // Savings velocity (always shown — shows fallback if no target set)
+          _sectionLabel('SAVINGS VELOCITY'),
+          const SizedBox(height: 12),
+          _SavingsVelocityWidget(
+            savingsTarget: savingsTarget,
+            monthLogs: monthLogs,
+          ),
+          const SizedBox(height: 24),
 
           // Cold shower
           if (_hasAnyColdShower(monthLogs)) ...[
@@ -219,7 +241,69 @@ class _StatsBody extends StatelessWidget {
           _MotivationBanner(
               streak: stats.currentStreak,
               weekly: stats.weeklyScore),
-          const SizedBox(height: 12),
+          const SizedBox(height: 20),
+
+          // Plan Week button
+          if (uid != null && activeHabits.isNotEmpty) ...[
+            _sectionLabel('WEEKLY PLANNING'),
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              height: 48,
+              child: Builder(builder: (ctx) => OutlinedButton.icon(
+                icon: const Icon(Icons.calendar_today_outlined,
+                    color: Color(0xFFFF6B35), size: 18),
+                label: const Text('Plan This Week',
+                    style: TextStyle(
+                        color: Color(0xFFFF6B35),
+                        fontWeight: FontWeight.bold)),
+                style: OutlinedButton.styleFrom(
+                  side: const BorderSide(color: Color(0xFFFF6B35)),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12)),
+                ),
+                onPressed: () => Navigator.of(ctx).push(
+                  MaterialPageRoute(
+                    fullscreenDialog: true,
+                    builder: (_) => SundayPlanningScreen(
+                      uid: uid!,
+                      habits: activeHabits,
+                    ),
+                  ),
+                ),
+              )),
+            ),
+            const SizedBox(height: 24),
+          ],
+
+          // Rollover Report
+          if (uid != null) ...[
+            _sectionLabel('ROLLOVER REPORT — THIS MONTH'),
+            const SizedBox(height: 12),
+            _RolloverReport(
+              uid: uid!,
+              habits: habits,
+              year: DateTime.now().year,
+              month: DateTime.now().month,
+            ),
+            const SizedBox(height: 24),
+          ],
+
+          // Weekly Reviews log
+          if (uid != null) ...[
+            _sectionLabel('WEEKLY REVIEWS'),
+            const SizedBox(height: 12),
+            _WeeklyReviewsLog(uid: uid!),
+            const SizedBox(height: 24),
+          ],
+
+          // Chakula self-assessment ratings
+          if (uid != null) ...[
+            _sectionLabel('CHAKULA IMPACT — SELF ASSESSMENT'),
+            const SizedBox(height: 12),
+            _ChakulaRatingGraph(uid: uid!),
+            const SizedBox(height: 12),
+          ],
         ],
       ),
     );
@@ -274,6 +358,150 @@ Widget _sectionLabel(String text) => Text(
         fontWeight: FontWeight.bold,
       ),
     );
+
+// ── Savings velocity ──────────────────────────────────────────────────────────
+
+class _SavingsVelocityWidget extends StatelessWidget {
+  final double? savingsTarget;
+  final Map<String, HabitLog> monthLogs;
+
+  const _SavingsVelocityWidget({
+    required this.savingsTarget,
+    required this.monthLogs,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (savingsTarget == null || savingsTarget! <= 0) {
+      return const _EmptySection(
+        message: 'Set a savings target in Stats to enable velocity tracking',
+      );
+    }
+
+    final now = DateTime.now();
+    final monthSaved =
+        monthLogs.values.fold(0.0, (s, l) => s + l.savingsAmount);
+    final v = computeVelocity(
+      monthSaved: monthSaved,
+      target: savingsTarget!,
+      now: now,
+    );
+
+    final fmt = NumberFormat('#,###');
+    final onTrack = v.isOnTrack;
+    final accent =
+        onTrack ? const Color(0xFF00E676) : const Color(0xFFD32F2F);
+
+    final message = onTrack
+        ? 'On track. Keep saving KES ${fmt.format(v.dailyAverage.round())}/day.'
+        : 'At this pace you will finish the month at KES ${fmt.format(v.projected.round())}.'
+            ' You need to save KES ${fmt.format(v.dailyRequired.round())}'
+            ' every remaining day to hit your target.';
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFF12122A),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: onTrack
+              ? const Color(0xFF1A4A2A)
+              : const Color(0xFF4A1A1A),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(
+                onTrack ? Icons.trending_up : Icons.trending_down,
+                color: accent,
+                size: 18,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  message,
+                  style: TextStyle(
+                    color: accent,
+                    fontSize: 13,
+                    height: 1.45,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              _VelocityStat(
+                label: 'THIS MONTH',
+                value: 'KES ${fmt.format(monthSaved.round())}',
+                color: const Color(0xFF00E676),
+              ),
+              _VelocityStat(
+                label: 'PROJECTED',
+                value: 'KES ${fmt.format(v.projected.round())}',
+                color: onTrack
+                    ? const Color(0xFF00E676)
+                    : const Color(0xFFFF6B35),
+              ),
+              _VelocityStat(
+                label: onTrack ? 'SURPLUS' : 'SHORTFALL',
+                value: 'KES ${fmt.format(v.shortfall.abs().round())}',
+                color: accent,
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _VelocityStat extends StatelessWidget {
+  final String label;
+  final String value;
+  final Color color;
+
+  const _VelocityStat({
+    required this.label,
+    required this.value,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Expanded(
+      child: Column(
+        children: [
+          Text(
+            label,
+            style: const TextStyle(
+              color: Colors.white38,
+              fontSize: 9,
+              letterSpacing: 1,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            value,
+            style: TextStyle(
+              color: color,
+              fontSize: 12,
+              fontWeight: FontWeight.bold,
+            ),
+            textAlign: TextAlign.center,
+          ),
+        ],
+      ),
+    );
+  }
+}
 
 // ── Savings target bar ────────────────────────────────────────────────────────
 
@@ -983,4 +1211,423 @@ class _MotivationBanner extends StatelessWidget {
       ),
     );
   }
+}
+
+// ── Rollover Report ───────────────────────────────────────────────────────────
+
+class _RolloverReport extends StatefulWidget {
+  final String uid;
+  final List<Habit> habits;
+  final int year;
+  final int month;
+
+  const _RolloverReport({
+    required this.uid,
+    required this.habits,
+    required this.year,
+    required this.month,
+  });
+
+  @override
+  State<_RolloverReport> createState() => _RolloverReportState();
+}
+
+class _RolloverReportState extends State<_RolloverReport> {
+  Map<String, int>? _totals;
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final totals = await FirestoreService.monthRolloverSummary(
+        widget.uid, widget.year, widget.month);
+    if (mounted) setState(() { _totals = totals; _loading = false; });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_loading) {
+      return const SizedBox(
+        height: 48,
+        child: Center(
+            child: CircularProgressIndicator(color: Color(0xFFFF6B35))),
+      );
+    }
+    final totals = _totals ?? {};
+    if (totals.isEmpty) {
+      return const Text(
+        'No rollovers this month.',
+        style: TextStyle(color: Colors.white38, fontSize: 13),
+      );
+    }
+
+    // Sort by rollover count desc
+    final sorted = totals.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+
+    return Column(
+      children: sorted.map((e) {
+        final habit = widget.habits.firstWhere(
+            (h) => h.id == e.key,
+            orElse: () => Habit(
+                id: e.key,
+                name: e.key,
+                category: '',
+                isActive: true,
+                createdAt: DateTime.now()));
+        final isBad = e.value > 10;
+        return Container(
+          margin: const EdgeInsets.only(bottom: 8),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          decoration: BoxDecoration(
+            color: const Color(0xFF1A1A2E),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+              color: isBad
+                  ? const Color(0xFFFF4444).withValues(alpha: 0.5)
+                  : const Color(0xFF2A2A4A),
+            ),
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(habit.name,
+                        style: const TextStyle(
+                            color: Colors.white, fontSize: 13)),
+                    if (isBad)
+                      const Text('You consistently avoid this. Investigate why.',
+                          style: TextStyle(
+                              color: Color(0xFFFF4444),
+                              fontSize: 11,
+                              fontStyle: FontStyle.italic)),
+                  ],
+                ),
+              ),
+              Text(
+                '${e.value}×',
+                style: TextStyle(
+                  color: isBad
+                      ? const Color(0xFFFF4444)
+                      : const Color(0xFFFF6B35),
+                  fontWeight: FontWeight.bold,
+                  fontSize: 15,
+                ),
+              ),
+            ],
+          ),
+        );
+      }).toList(),
+    );
+  }
+}
+
+// ── Weekly Reviews Log ────────────────────────────────────────────────────────
+
+class _WeeklyReviewsLog extends StatefulWidget {
+  final String uid;
+  const _WeeklyReviewsLog({required this.uid});
+
+  @override
+  State<_WeeklyReviewsLog> createState() => _WeeklyReviewsLogState();
+}
+
+class _WeeklyReviewsLogState extends State<_WeeklyReviewsLog> {
+  List<WeeklyReview>? _reviews;
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final reviews = await FirestoreService.getAllWeeklyReviews(widget.uid);
+    if (mounted) setState(() { _reviews = reviews; _loading = false; });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_loading) {
+      return const SizedBox(
+        height: 48,
+        child: Center(child: CircularProgressIndicator(color: Color(0xFFFF6B35))),
+      );
+    }
+    final reviews = _reviews ?? [];
+    if (reviews.isEmpty) {
+      return const Text(
+        'No reviews yet. Complete your first one this Sunday.',
+        style: TextStyle(color: Colors.white38, fontSize: 13),
+      );
+    }
+    return Column(
+      children: reviews.map((r) => _ReviewCard(review: r)).toList(),
+    );
+  }
+}
+
+class _ReviewCard extends StatelessWidget {
+  final WeeklyReview review;
+  const _ReviewCard({required this.review});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1A1A2E),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFF2A2A4A)),
+      ),
+      child: Theme(
+        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+        child: ExpansionTile(
+          tilePadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+          childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          title: Text(
+            review.weekKey,
+            style: const TextStyle(
+                color: Color(0xFFFF6B35),
+                fontWeight: FontWeight.bold,
+                fontSize: 13,
+                letterSpacing: 1),
+          ),
+          subtitle: Text(
+            review.whatChanges,
+            style: const TextStyle(color: Colors.white54, fontSize: 12),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+          iconColor: Colors.white38,
+          collapsedIconColor: Colors.white38,
+          children: [
+            _ReviewQA(
+                label: 'BIGGEST EXCUSE', answer: review.biggestExcuse),
+            const SizedBox(height: 10),
+            _ReviewQA(
+                label: 'HABIT AT RISK',
+                answer: '${review.habitAtRisk} — ${review.whyNotQuitting}'),
+            const SizedBox(height: 10),
+            _ReviewQA(
+                label: 'WHAT CHANGES', answer: review.whatChanges),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ReviewQA extends StatelessWidget {
+  final String label;
+  final String answer;
+  const _ReviewQA({required this.label, required this.answer});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: const TextStyle(
+              color: Colors.white30,
+              fontSize: 10,
+              fontWeight: FontWeight.bold,
+              letterSpacing: 1.5),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          answer,
+          style: const TextStyle(color: Colors.white70, fontSize: 13, height: 1.4),
+        ),
+      ],
+    );
+  }
+}
+
+// ── Chakula Rating Graph ──────────────────────────────────────────────────────
+
+class _ChakulaRatingGraph extends StatefulWidget {
+  final String uid;
+  const _ChakulaRatingGraph({required this.uid});
+
+  @override
+  State<_ChakulaRatingGraph> createState() => _ChakulaRatingGraphState();
+}
+
+class _ChakulaRatingGraphState extends State<_ChakulaRatingGraph> {
+  List<ChakulaAssessment>? _assessments;
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final items = await FirestoreService.getAllChakulaAssessments(widget.uid);
+    if (mounted) setState(() { _assessments = items; _loading = false; });
+  }
+
+  /// Returns how many trailing weeks are flat or declining.
+  int _stagnantWeeks(List<ChakulaAssessment> items) {
+    if (items.length < 2) return 0;
+    int count = 0;
+    for (int i = items.length - 1; i > 0; i--) {
+      if (items[i].rating <= items[i - 1].rating) {
+        count++;
+      } else {
+        break;
+      }
+    }
+    return count;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_loading) {
+      return const SizedBox(
+        height: 48,
+        child: Center(
+            child: CircularProgressIndicator(color: Color(0xFFFF6B35))),
+      );
+    }
+    final items = _assessments ?? [];
+    if (items.isEmpty) {
+      return const Text(
+        'No Chakula assessments yet. Complete one after Sunday planning.',
+        style: TextStyle(color: Colors.white38, fontSize: 13),
+      );
+    }
+
+    final stagnant = _stagnantWeeks(items);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (stagnant >= 2)
+          Container(
+            margin: const EdgeInsets.only(bottom: 12),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            decoration: BoxDecoration(
+              color: const Color(0xFF1A0A0A),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(
+                  color: const Color(0xFFFF4444).withValues(alpha: 0.4)),
+            ),
+            child: Text(
+              'Your Chakula impact has not improved in $stagnant weeks. Something needs to change.',
+              style: const TextStyle(
+                  color: Color(0xFFFF6666), fontSize: 13, height: 1.4),
+            ),
+          ),
+        SizedBox(
+          height: 160,
+          child: Stack(
+            children: [
+              // Grid lines (y-axis labels)
+              Positioned(
+                left: 0,
+                top: 0,
+                bottom: 0,
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [5, 4, 3, 2, 1]
+                      .map((r) => Text('$r',
+                          style: const TextStyle(
+                              color: Colors.white24,
+                              fontSize: 9)))
+                      .toList(),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.only(left: 16),
+                child: CustomPaint(
+                  painter: _RatingLinePainter(
+                      items.skip(max(0, items.length - 6)).toList()),
+                  child: const SizedBox.expand(),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 8),
+        // X-axis week labels (last 6 at most)
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: items
+              .skip(max(0, items.length - 6))
+              .map((a) => Text(
+                    a.weekKey.replaceFirst(RegExp(r'^\d{4}-'), ''),
+                    style: const TextStyle(
+                        color: Colors.white24,
+                        fontSize: 9,
+                        letterSpacing: 0.5),
+                  ))
+              .toList(),
+        ),
+      ],
+    );
+  }
+}
+
+class _RatingLinePainter extends CustomPainter {
+  final List<ChakulaAssessment> items;
+  const _RatingLinePainter(this.items);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final visible = items;
+    if (visible.length < 2) return;
+
+    final paint = Paint()
+      ..color = const Color(0xFFFF6B35)
+      ..strokeWidth = 2.5
+      ..strokeCap = StrokeCap.round
+      ..style = PaintingStyle.stroke;
+
+    final dotPaint = Paint()
+      ..color = const Color(0xFFFF6B35)
+      ..style = PaintingStyle.fill;
+
+    final gridPaint = Paint()
+      ..color = const Color(0xFF2A2A4A)
+      ..strokeWidth = 1;
+
+    // Draw horizontal grid lines at ratings 1–5
+    for (int r = 1; r <= 5; r++) {
+      final y = size.height - (r - 1) / 4 * size.height * 0.85 - size.height * 0.05;
+      canvas.drawLine(Offset(0, y), Offset(size.width, y), gridPaint);
+    }
+
+    Offset pt(int i) {
+      final x = i / (visible.length - 1) * size.width;
+      final y = size.height -
+          (visible[i].rating - 1) / 4 * size.height * 0.85 -
+          size.height * 0.05;
+      return Offset(x, y);
+    }
+
+    final path = Path()..moveTo(pt(0).dx, pt(0).dy);
+    for (int i = 1; i < visible.length; i++) {
+      path.lineTo(pt(i).dx, pt(i).dy);
+    }
+    canvas.drawPath(path, paint);
+
+    for (int i = 0; i < visible.length; i++) {
+      canvas.drawCircle(pt(i), 5, dotPaint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(_RatingLinePainter old) => old.items != items;
 }

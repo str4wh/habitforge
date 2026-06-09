@@ -17,5 +17,10 @@ final authProvider = FutureProvider<User?>((ref) async {
     NotificationService.initWeb(user.uid);
   }
 
+  // Schedule (or cancel) tonight's savings velocity notification — fire and forget
+  if (!kIsWeb) {
+    NotificationService.scheduleSavingsVelocityNotification(user.uid);
+  }
+
   return user;
 });

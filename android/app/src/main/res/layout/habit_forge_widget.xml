@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@drawable/widget_background"
+    android:padding="14dp">
+
+    <!-- Header label -->
+    <TextView
+        android:id="@+id/widget_header"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="HABITFORGE — WHY I DO THIS"
+        android:textColor="#99FFFFFF"
+        android:textSize="9sp"
+        android:textAllCaps="true"
+        android:letterSpacing="0.12"
+        android:fontFamily="sans-serif-medium" />
+
+    <!-- WHY statement — expands to fill available vertical space -->
+    <TextView
+        android:id="@+id/widget_statement"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:layout_marginTop="6dp"
+        android:layout_marginBottom="6dp"
+        android:text="LOADING YOUR WHY..."
+        android:textColor="#FFFFFF"
+        android:textSize="12sp"
+        android:fontFamily="sans-serif-medium"
+        android:textAllCaps="true"
+        android:ellipsize="end"
+        android:maxLines="3"
+        android:gravity="center_vertical" />
+
+    <!-- Divider -->
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="#33FFFFFF"
+        android:layout_marginBottom="6dp" />
+
+    <!-- Progress count -->
+    <TextView
+        android:id="@+id/widget_progress"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="0 / 9 HABITS DONE TODAY"
+        android:textColor="#CCFF6B35"
+        android:textSize="10sp"
+        android:fontFamily="sans-serif-medium"
+        android:textAllCaps="true"
+        android:letterSpacing="0.08" />
+
+</LinearLayout>
