@@ -46,8 +46,6 @@ class FirestoreService {
       ('Work on Chakula', 'work'),
       ('Post on Uncles', 'social'),
       ('Post Shukrani', 'social'),
-      ('Reddit Shukrani', 'social'),
-      ('Tweet Shukrani', 'social'),
       ('Save Any Amount', 'finance'),
       ('Workout (50 pushups / 50 situps / 60 jumping jacks)', 'health'),
     ];

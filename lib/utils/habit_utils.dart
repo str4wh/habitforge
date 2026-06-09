@@ -7,8 +7,6 @@ HabitType habitTypeFor(String name) {
     case 'Cold Shower':
       return HabitType.coldShower;
     case 'Post Shukrani':
-    case 'Tweet Shukrani':
-    case 'Reddit Shukrani':
     case 'Post on Uncles':
       return HabitType.shukrani;
     case 'Work on Chakula':
@@ -37,9 +35,7 @@ String q5For(String habitName) {
   if (habitName == 'Post on Uncles') {
     return "Who specifically are you trying to reach and why does reaching them matter beyond followers?";
   }
-  if (habitName == 'Post Shukrani' ||
-      habitName == 'Tweet Shukrani' ||
-      habitName == 'Reddit Shukrani') {
+  if (habitName == 'Post Shukrani') {
     return "You have roughly 100 users. What does consistent posting do for that number in 90 days?";
   }
   if (habitName == 'Save Any Amount') {
