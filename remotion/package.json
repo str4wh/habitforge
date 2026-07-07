@@ -1,0 +1,20 @@
+{
+  "name": "habitforge-remotion",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "studio": "remotion studio",
+    "render": "remotion render PremiumMotionBackground ../assets/motion_backgrounds/premium_motion_background_16x9.mp4 --codec h264",
+    "still": "remotion still PremiumMotionBackground preview.jpg --frame 150"
+  },
+  "dependencies": {
+    "@remotion/cli": "^4.0.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "remotion": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "typescript": "^5.5.0"
+  }
+}
