@@ -8,14 +8,17 @@ import {AbsoluteFill, Img, staticFile, useCurrentFrame, useVideoConfig} from 're
 const ZOOM_AMPLITUDE = 0.055;
 const DRIFT_PX = 18;
 const GRAIN_OPACITY = 0.16;
+// Full zoom/drift cycles per composition. Whole numbers keep the loop
+// seamless: the first and last frame stay identical.
+const MOTION_SPEED = 3;
 
 export const MotionBackground: React.FC = () => {
   const frame = useCurrentFrame();
   const {durationInFrames, width, height} = useVideoConfig();
 
-  // Full sine cycle over the composition: frame 0 and the loop point are
+  // Whole sine cycles over the composition: frame 0 and the loop point are
   // identical, so the rendered video loops seamlessly.
-  const phase = (2 * Math.PI * frame) / durationInFrames;
+  const phase = (2 * Math.PI * MOTION_SPEED * frame) / durationInFrames;
   const zoom = 1 + ZOOM_AMPLITUDE * (0.5 - 0.5 * Math.cos(phase));
   const driftX = DRIFT_PX * Math.sin(phase);
 
