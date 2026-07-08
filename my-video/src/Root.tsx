@@ -4,6 +4,7 @@ import { Logo, myCompSchema2 } from "./HelloWorld/Logo";
 import { VisaFree } from "./VisaFree";
 import { EuroCounter } from "./EuroCounter";
 import { NoLanguageBarrier } from "./NoLanguageBarrier";
+import { BestTimeCalendar } from "./BestTimeCalendar";
 
 // Each <Composition> is an entry in the sidebar!
 
@@ -44,6 +45,16 @@ export const RemotionRoot: React.FC = () => {
         id="NoLanguageBarrier"
         component={NoLanguageBarrier}
         durationInFrames={150}
+        fps={30}
+        width={1080}
+        height={1920}
+      />
+
+      {/* 6s green-screen overlay: calendar + plane, best months to visit */}
+      <Composition
+        id="BestTimeCalendar"
+        component={BestTimeCalendar}
+        durationInFrames={180}
         fps={30}
         width={1080}
         height={1920}
