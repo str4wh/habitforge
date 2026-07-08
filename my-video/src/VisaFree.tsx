@@ -14,6 +14,11 @@ import {
 const GREEN = "#0E9F4F";
 const GREEN_DEEP = "#066B33";
 const GREEN_BRIGHT = "#22C55E";
+const RED = "#DC2626";
+const RED_DEEP = "#991B1B";
+
+const FLIP_START = 55;
+const FLIP_END = 82;
 
 // Staggered letter reveal with blur + rise
 const Letter: React.FC<{
@@ -30,10 +35,11 @@ const Letter: React.FC<{
     config: { damping: 16, stiffness: 130, mass: 0.6 },
   });
 
-  const translateY = interpolate(progress, [0, 1], [120, 0]);
-  const blur = interpolate(progress, [0, 1], [16, 0], {
-    extrapolateRight: "clamp",
-  });
+  const translateY = interpolate(progress, [0, 1], [110, 0]);
+  const blur = Math.max(
+    0,
+    interpolate(progress, [0, 1], [16, 0], { extrapolateRight: "clamp" }),
+  );
   const opacity = interpolate(progress, [0, 0.5], [0, 1], {
     extrapolateRight: "clamp",
   });
@@ -43,7 +49,7 @@ const Letter: React.FC<{
       style={{
         display: "inline-block",
         transform: `translateY(${translateY}px)`,
-        filter: `blur(${Math.max(0, blur)}px)`,
+        filter: `blur(${blur}px)`,
         opacity,
         whiteSpace: "pre",
       }}
@@ -64,7 +70,7 @@ const Word: React.FC<{ text: string; startFrame: number }> = ({
   </>
 );
 
-// Floating green particles for atmosphere (drawn above everything)
+// Floating green particles for atmosphere
 const Particles: React.FC = () => {
   const frame = useCurrentFrame();
   const { width, height, durationInFrames } = useVideoConfig();
@@ -145,53 +151,128 @@ const LightStreak: React.FC<{
   );
 };
 
+// One face of the flipping card
+const CardFace: React.FC<{
+  wash: string;
+  border: string;
+  children?: React.ReactNode;
+  flipped?: boolean;
+}> = ({ wash, border, children, flipped }) => (
+  <div
+    style={{
+      position: "absolute",
+      inset: 0,
+      borderRadius: 32,
+      overflow: "hidden",
+      backgroundColor: "#FFFFFF",
+      border: `3px solid ${border}`,
+      boxShadow: "0 40px 90px rgba(10,40,20,0.28)",
+      backfaceVisibility: "hidden",
+      transform: flipped ? "rotateY(180deg)" : undefined,
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+    }}
+  >
+    <Img
+      src={staticFile("travel.jpg")}
+      style={{ width: "86%" }}
+    />
+    {/* Color wash over the face */}
+    <div
+      style={{
+        position: "absolute",
+        inset: 0,
+        background: wash,
+        mixBlendMode: "multiply",
+      }}
+    />
+    {children}
+  </div>
+);
+
 export const VisaFree: React.FC = () => {
   const frame = useCurrentFrame();
   const { fps, durationInFrames } = useVideoConfig();
 
   // Bold cinematic push-in across the whole clip
-  const drift = interpolate(frame, [0, durationInFrames], [1.0, 1.16], {
+  const drift = interpolate(frame, [0, durationInFrames], [1.0, 1.13], {
     easing: Easing.inOut(Easing.ease),
   });
 
-  // --- Image entrance: flies in from bottom-right with rotation & motion blur ---
-  const flyIn = spring({
+  // --- Card entrance: drops into center with scale + blur ---
+  const entry = spring({
     frame,
     fps,
     delay: 2,
-    config: { damping: 15, stiffness: 42, mass: 1.1 },
+    config: { damping: 14, stiffness: 90, mass: 0.9 },
   });
-  const imgX = interpolate(flyIn, [0, 1], [900, 0]);
-  const imgY = interpolate(flyIn, [0, 1], [520, 0]);
-  const imgRotate = interpolate(flyIn, [0, 1], [28, -5]);
-  const imgScale = interpolate(flyIn, [0, 1], [1.5, 1]);
-  const imgBlur = Math.max(0, interpolate(flyIn, [0, 0.75, 1], [14, 3, 0]));
+  const cardEntryScale = interpolate(entry, [0, 1], [1.6, 1]);
+  const cardEntryY = interpolate(entry, [0, 1], [-420, 0]);
+  const entryBlur = Math.max(0, interpolate(entry, [0, 1], [14, 0]));
 
-  // Gentle float once landed
-  const floatY = Math.sin(frame / 22) * 8 * flyIn;
-
-  // Impact flash when the image lands (~frame 30)
-  const flash = interpolate(frame, [28, 34, 46], [0, 0.5, 0], {
-    extrapolateLeft: "clamp",
-    extrapolateRight: "clamp",
-  });
-
-  // Underline sweeps in after the words land
-  const underline = spring({
-    frame: frame - 88,
+  // --- "NO VISA" stamp slams on (~frame 18) ---
+  const stamp = spring({
+    frame: frame - 18,
     fps,
-    config: { damping: 200, stiffness: 90 },
+    config: { damping: 13, stiffness: 200, mass: 0.7 },
   });
-
-  // Glow pulse behind the title as it lands
-  const glow = interpolate(frame, [48, 70, 110], [0, 0.5, 0.22], {
-    extrapolateLeft: "clamp",
+  const stampScale = interpolate(stamp, [0, 1], [2.6, 1]);
+  const stampOpacity = interpolate(stamp, [0, 0.35], [0, 1], {
     extrapolateRight: "clamp",
   });
+  // Impact jitter right after the stamp lands
+  const jitter =
+    frame > 20 && frame < 30
+      ? Math.sin(frame * 3.1) * interpolate(frame, [20, 30], [7, 0])
+      : 0;
 
-  // Grounding shadow under the image, drawn ON TOP with multiply so it
-  // reads through the JPG's white background without revealing its edges
-  const shadowOpacity = flyIn * 0.9;
+  // --- 3D flip: red face rotates away, green face rotates in ---
+  const flip = interpolate(frame, [FLIP_START, FLIP_END], [0, 180], {
+    extrapolateLeft: "clamp",
+    extrapolateRight: "clamp",
+    easing: Easing.inOut(Easing.cubic),
+  });
+  // Card lifts slightly and re-settles during the flip
+  const flipLift = Math.sin((flip / 180) * Math.PI) * -46;
+
+  // Flash right at the midpoint of the flip
+  const midFrame = (FLIP_START + FLIP_END) / 2;
+  const flash = interpolate(
+    frame,
+    [midFrame - 4, midFrame, midFrame + 10],
+    [0, 0.65, 0],
+    { extrapolateLeft: "clamp", extrapolateRight: "clamp" },
+  );
+
+  // Red ambience during the "no" phase, green after the flip
+  const redAmbience = interpolate(
+    frame,
+    [12, 20, FLIP_START + 8, midFrame],
+    [0, 0.5, 0.5, 0],
+    { extrapolateLeft: "clamp", extrapolateRight: "clamp" },
+  );
+  const greenGlow = interpolate(
+    frame,
+    [midFrame, FLIP_END + 8, 120],
+    [0, 0.55, 0.3],
+    { extrapolateLeft: "clamp", extrapolateRight: "clamp" },
+  );
+
+  // --- "VISA FREE" title in front of the card after the flip ---
+  const titleStart = FLIP_END + 2;
+  // Backdrop glow that keeps the title readable over the image
+  const titleBackdrop = interpolate(
+    frame,
+    [titleStart, titleStart + 16],
+    [0, 1],
+    { extrapolateLeft: "clamp", extrapolateRight: "clamp" },
+  );
+  const underline = spring({
+    frame: frame - (titleStart + 26),
+    fps,
+    config: { damping: 200, stiffness: 110 },
+  });
 
   // Clean fade to end the clip
   const fadeOut = interpolate(
@@ -204,120 +285,148 @@ export const VisaFree: React.FC = () => {
   return (
     <AbsoluteFill style={{ backgroundColor: "#FFFFFF", opacity: fadeOut }}>
       <AbsoluteFill style={{ transform: `scale(${drift})` }}>
-        {/* Layout: title left, image right */}
+        {/* Centered flipping card */}
         <AbsoluteFill
-          style={{
-            flexDirection: "row",
-            alignItems: "center",
-            padding: "0 120px",
-          }}
+          style={{ justifyContent: "center", alignItems: "center" }}
         >
-          {/* Title block */}
-          <div style={{ flex: 1.15, position: "relative" }}>
-            <h1
-              style={{
-                position: "relative",
-                fontFamily: "'Helvetica Neue', Helvetica, Arial, sans-serif",
-                fontWeight: 900,
-                fontSize: 230,
-                lineHeight: 1.02,
-                letterSpacing: 6,
-                margin: 0,
-                color: GREEN,
-                textShadow: "0 6px 60px rgba(14,159,79,0.25)",
-              }}
-            >
-              <div>
-                <Word text="VISA" startFrame={42} />
-              </div>
-              <div style={{ color: GREEN_DEEP }}>
-                <Word text="FREE" startFrame={54} />
-              </div>
-            </h1>
-
-            {/* Sweeping underline */}
-            <div
-              style={{
-                height: 12,
-                width: `${underline * 62}%`,
-                marginTop: 34,
-                borderRadius: 8,
-                background: `linear-gradient(90deg, ${GREEN_BRIGHT}, ${GREEN_DEEP})`,
-                boxShadow: "0 6px 30px rgba(14,159,79,0.45)",
-              }}
-            />
-          </div>
-
-          {/* Travel image — rendered plain; all atmosphere is layered on top
-              so the JPG's white background stays invisible on the white set */}
           <div
             style={{
-              flex: 1,
-              display: "flex",
-              justifyContent: "center",
-              position: "relative",
-              transform: `translate(${imgX}px, ${imgY + floatY}px) rotate(${imgRotate}deg) scale(${imgScale})`,
-              filter: `blur(${imgBlur}px)`,
+              width: 600,
+              height: 780,
+              perspective: 1600,
+              transform: `translateY(${cardEntryY + flipLift}px) translateX(${jitter}px) scale(${cardEntryScale})`,
+              filter: `blur(${entryBlur}px)`,
             }}
           >
-            <Img src={staticFile("travel.jpg")} style={{ width: 620 }} />
-            {/* Grounding shadow, multiplied over the image bottom */}
             <div
               style={{
                 position: "absolute",
-                bottom: -20,
-                left: "14%",
-                right: "14%",
-                height: 90,
-                borderRadius: "50%",
-                background:
-                  "radial-gradient(ellipse, rgba(6,50,25,0.20) 0%, rgba(6,50,25,0) 70%)",
-                filter: "blur(10px)",
-                mixBlendMode: "multiply",
-                opacity: shadowOpacity,
+                inset: 0,
+                transformStyle: "preserve-3d",
+                transform: `rotateY(${flip}deg)`,
               }}
-            />
+            >
+              {/* FRONT: red "no" state */}
+              <CardFace
+                wash="rgba(220,38,38,0.42)"
+                border={RED}
+              >
+                <div
+                  style={{
+                    position: "absolute",
+                    top: "50%",
+                    left: "50%",
+                    transform: `translate(-50%, -50%) rotate(-12deg) scale(${stampScale})`,
+                    opacity: stampOpacity,
+                    color: RED,
+                    border: `10px solid ${RED}`,
+                    borderRadius: 18,
+                    padding: "14px 34px",
+                    fontFamily:
+                      "'Helvetica Neue', Helvetica, Arial, sans-serif",
+                    fontWeight: 900,
+                    fontSize: 92,
+                    letterSpacing: 10,
+                    whiteSpace: "nowrap",
+                    backgroundColor: "rgba(255,255,255,0.82)",
+                    boxShadow: "0 10px 40px rgba(153,27,27,0.35)",
+                  }}
+                >
+                  NO VISA
+                </div>
+              </CardFace>
+
+              {/* BACK: green state */}
+              <CardFace
+                wash="rgba(34,197,94,0.14)"
+                border={GREEN}
+                flipped
+              />
+            </div>
           </div>
         </AbsoluteFill>
 
-        {/* --- Atmosphere overlays (drawn above the image so nothing reveals
-             the JPG's rectangular edges) --- */}
+        {/* "VISA FREE" — centered, in front of the card */}
+        <AbsoluteFill
+          style={{ justifyContent: "center", alignItems: "center" }}
+        >
+          {/* Soft white backdrop for readability over the card */}
+          <div
+            style={{
+              position: "absolute",
+              width: 1500,
+              height: 380,
+              background:
+                "radial-gradient(ellipse, rgba(255,255,255,0.92) 0%, rgba(255,255,255,0.55) 45%, rgba(255,255,255,0) 72%)",
+              opacity: titleBackdrop,
+            }}
+          />
+          <h1
+            style={{
+              position: "relative",
+              fontFamily: "'Helvetica Neue', Helvetica, Arial, sans-serif",
+              fontWeight: 900,
+              fontSize: 178,
+              letterSpacing: 8,
+              margin: 0,
+              color: GREEN,
+              whiteSpace: "nowrap",
+              textShadow:
+                "0 4px 18px rgba(255,255,255,0.9), 0 8px 60px rgba(14,159,79,0.35)",
+            }}
+          >
+            <Word text="VISA FREE" startFrame={titleStart} />
+          </h1>
+          {/* Sweeping underline */}
+          <div
+            style={{
+              height: 11,
+              width: `${underline * 46}%`,
+              marginTop: 30,
+              borderRadius: 8,
+              background: `linear-gradient(90deg, ${GREEN_BRIGHT}, ${GREEN_DEEP})`,
+              boxShadow: "0 6px 30px rgba(14,159,79,0.45)",
+            }}
+          />
+        </AbsoluteFill>
 
-        {/* Glow pulse around the title */}
+        {/* --- Atmosphere overlays --- */}
+
+        {/* Red ambience while "NO VISA" shows */}
         <AbsoluteFill
           style={{
             background:
-              "radial-gradient(ellipse at 24% 50%, rgba(34,197,94,0.30) 0%, rgba(34,197,94,0) 45%)",
-            opacity: glow,
+              "radial-gradient(ellipse at 50% 50%, rgba(220,38,38,0) 40%, rgba(153,27,27,0.16) 100%)",
+            opacity: redAmbience,
             pointerEvents: "none",
           }}
         />
 
-        {/* Soft green vignette / color grade over the whole frame */}
+        {/* Green glow ambience after the flip */}
         <AbsoluteFill
           style={{
             background:
-              "radial-gradient(ellipse at 45% 45%, rgba(255,255,255,0) 55%, rgba(6,107,51,0.10) 100%)",
-            mixBlendMode: "multiply",
+              "radial-gradient(ellipse at 50% 50%, rgba(34,197,94,0.16) 0%, rgba(34,197,94,0) 55%), radial-gradient(ellipse at 50% 50%, rgba(255,255,255,0) 55%, rgba(6,107,51,0.12) 100%)",
+            opacity: greenGlow,
             pointerEvents: "none",
           }}
         />
 
         <Particles />
 
-        {/* Impact flash when the image lands */}
+        {/* Flash at the flip midpoint */}
         <AbsoluteFill
           style={{
             background:
-              "radial-gradient(ellipse at 68% 50%, rgba(210,255,225,0.9) 0%, rgba(255,255,255,0) 60%)",
+              "radial-gradient(ellipse at 50% 50%, rgba(220,255,232,0.95) 0%, rgba(255,255,255,0) 62%)",
             opacity: flash,
             pointerEvents: "none",
           }}
         />
 
         {/* Cinematic light streaks */}
-        <LightStreak start={26} end={62} peak={0.5} width={340} />
-        <LightStreak start={95} end={138} peak={0.4} width={260} />
+        <LightStreak start={30} end={58} peak={0.35} width={300} />
+        <LightStreak start={FLIP_END + 8} end={142} peak={0.45} width={320} />
       </AbsoluteFill>
     </AbsoluteFill>
   );
