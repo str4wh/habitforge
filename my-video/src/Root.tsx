@@ -2,6 +2,7 @@ import { Composition } from "remotion";
 import { HelloWorld, myCompSchema } from "./HelloWorld";
 import { Logo, myCompSchema2 } from "./HelloWorld/Logo";
 import { VisaFree } from "./VisaFree";
+import { EuroCounter } from "./EuroCounter";
 
 // Each <Composition> is an entry in the sidebar!
 
@@ -22,6 +23,16 @@ export const RemotionRoot: React.FC = () => {
         id="VisaFreeVertical"
         component={VisaFree}
         durationInFrames={150}
+        fps={30}
+        width={1080}
+        height={1920}
+      />
+
+      {/* 3s cinematic €0→€10 counter, vertical for TikTok */}
+      <Composition
+        id="EuroCounter"
+        component={EuroCounter}
+        durationInFrames={90}
         fps={30}
         width={1080}
         height={1920}
