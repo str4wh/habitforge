@@ -3,6 +3,7 @@ import { HelloWorld, myCompSchema } from "./HelloWorld";
 import { Logo, myCompSchema2 } from "./HelloWorld/Logo";
 import { VisaFree } from "./VisaFree";
 import { EuroCounter } from "./EuroCounter";
+import { NoLanguageBarrier } from "./NoLanguageBarrier";
 
 // Each <Composition> is an entry in the sidebar!
 
@@ -33,6 +34,16 @@ export const RemotionRoot: React.FC = () => {
         id="EuroCounter"
         component={EuroCounter}
         durationInFrames={90}
+        fps={30}
+        width={1080}
+        height={1920}
+      />
+
+      {/* 5s green-screen overlay: Kreol/French/English chat bubbles */}
+      <Composition
+        id="NoLanguageBarrier"
+        component={NoLanguageBarrier}
+        durationInFrames={150}
         fps={30}
         width={1080}
         height={1920}
