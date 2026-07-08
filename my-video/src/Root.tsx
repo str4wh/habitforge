@@ -17,6 +17,16 @@ export const RemotionRoot: React.FC = () => {
         height={1080}
       />
 
+      {/* 9:16 vertical cut for TikTok/Reels/Shorts */}
+      <Composition
+        id="VisaFreeVertical"
+        component={VisaFree}
+        durationInFrames={150}
+        fps={30}
+        width={1080}
+        height={1920}
+      />
+
       <Composition
         // You can take the "id" to render a video:
         // npx remotion render HelloWorld

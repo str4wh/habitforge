@@ -193,7 +193,15 @@ const CardFace: React.FC<{
 
 export const VisaFree: React.FC = () => {
   const frame = useCurrentFrame();
-  const { fps, durationInFrames } = useVideoConfig();
+  const { fps, durationInFrames, width, height } = useVideoConfig();
+
+  // Same design in both orientations — only the sizes adapt to the frame
+  const isPortrait = height > width;
+  const cardWidth = isPortrait ? 780 : 600;
+  const cardHeight = isPortrait ? 1014 : 780;
+  const titleSize = isPortrait ? 146 : 178;
+  const stampSize = isPortrait ? 110 : 92;
+  const backdropWidth = Math.min(width * 0.98, 1500);
 
   // Bold cinematic push-in across the whole clip
   const drift = interpolate(frame, [0, durationInFrames], [1.0, 1.13], {
@@ -291,8 +299,8 @@ export const VisaFree: React.FC = () => {
         >
           <div
             style={{
-              width: 600,
-              height: 780,
+              width: cardWidth,
+              height: cardHeight,
               perspective: 1600,
               transform: `translateY(${cardEntryY + flipLift}px) translateX(${jitter}px) scale(${cardEntryScale})`,
               filter: `blur(${entryBlur}px)`,
@@ -325,7 +333,7 @@ export const VisaFree: React.FC = () => {
                     fontFamily:
                       "'Helvetica Neue', Helvetica, Arial, sans-serif",
                     fontWeight: 900,
-                    fontSize: 92,
+                    fontSize: stampSize,
                     letterSpacing: 10,
                     whiteSpace: "nowrap",
                     backgroundColor: "rgba(255,255,255,0.82)",
@@ -354,7 +362,7 @@ export const VisaFree: React.FC = () => {
           <div
             style={{
               position: "absolute",
-              width: 1500,
+              width: backdropWidth,
               height: 380,
               background:
                 "radial-gradient(ellipse, rgba(255,255,255,0.92) 0%, rgba(255,255,255,0.55) 45%, rgba(255,255,255,0) 72%)",
@@ -366,7 +374,7 @@ export const VisaFree: React.FC = () => {
               position: "relative",
               fontFamily: "'Helvetica Neue', Helvetica, Arial, sans-serif",
               fontWeight: 900,
-              fontSize: 178,
+              fontSize: titleSize,
               letterSpacing: 8,
               margin: 0,
               color: GREEN,
